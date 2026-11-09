@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0e17">
+<title>Solo-SafetyNet — LOC Monitor</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e17; --card:#111827; --card2:#1a1f2e; --accent:#22d3ee; --accent2:#10b981;
+  --danger:#ef4444; --warn:#f59e0b; --text:#e2e8f0; --muted:#64748b; --border:#1e293b;
+  --radius:16px; --radius-sm:10px;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg); color:var(--text); min-height:100vh; min-height:100dvh;
+  overflow-x:hidden; -webkit-tap-highlight-color:transparent;
+  display:flex; flex-direction:column; align-items:center; padding:16px; padding-top:max(16px,env(safe-area-inset-top));
+}
+.app{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.header h1{font-size:22px;font-weight:700;letter-spacing:-0.3px}
+.badge{display:flex;align-items:center;gap:6px;background:var(--card);padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.badge .dot{width:8px;height:8px;border-radius:50%}
+.dot.online{background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+.dot.offline{background:var(--danger)}
+
+/* Status bar */
+.status-bar{display:flex;gap:10px;flex-wrap:wrap}
+.stat{flex:1;min-width:calc(50% - 5px);background:var(--card);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.stat .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.stat .value{font-size:26px;font-weight:700}
+.stat .sub{font-size:11px;color:var(--muted)}
+
+/* Waveform */
+.wave-card{background:var(--card);border-radius:var(--radius);padding:16px;overflow:hidden}
+.wave-card .label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.wave-card .label-row span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.wave-card .live{color:var(--accent2);font-weight:600}
+canvas{width:100%;height:130px;display:block;border-radius:var(--radius-sm)}
+
+/* MEMS */
+.mems-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.mems-cell{background:var(--card);border-radius:var(--radius);padding:12px;text-align:center}
+.mems-cell .axis{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.mems-cell .val{font-size:20px;font-weight:700;margin:4px 0}
+.mems-cell .bar{height:3px;border-radius:2px;margin-top:4px;transition:width 0.3s}
+.bar.x{background:var(--accent)} .bar.y{background:var(--accent2)} .bar.z{background:var(--warn)}
+
+/* Epoch progress */
+.epoch-card{background:var(--card);border-radius:var(--radius);padding:16px}
+.epoch-card .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.epoch-card .title{font-weight:600;font-size:15px}
+.epoch-card .timer{font-size:13px;color:var(--muted)}
+.epoch-dots{display:flex;gap:12px;justify-content:center;margin-bottom:10px}
+.epoch-dot{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;transition:all 0.4s}
+.epoch-dot.done{background:var(--accent2);border-color:var(--accent2);color:#000}
+.epoch-dot.active{border-color:var(--accent);box-shadow:0 0 16px rgba(34,211,238,0.3);animation:pulse 1.5s infinite}
+.epoch-dot.danger{background:var(--danger);border-color:var(--danger);color:#fff;animation:shake 0.5s}
+@keyframes pulse{0%,100%{box-shadow:0 0 8px rgba(34,211,238,0.3)}50%{box-shadow:0 0 22px rgba(34,211,238,0.6)}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+
+/* Score */
+.score{text-align:center;font-size:13px;color:var(--muted)}
+.score strong{color:var(--accent)}
+
+/* Alert banner */
+.alert-banner{display:none;background:linear-gradient(135deg,#7f1d1d,#991b1b);border:1px solid var(--danger);border-radius:var(--radius);padding:16px;text-align:center;animation:slideIn 0.4s ease-out}
+.alert-banner.show{display:block}
+.alert-banner .icon{font-size:40px;margin-bottom:6px}
+.alert-banner .msg{font-weight:700;font-size:16px;margin-bottom:6px}
+.alert-banner .detail{font-size:12px;color:#fca5a5;margin-bottom:12px}
+.alert-banner .actions{display:flex;gap:8px;justify-content:center}
+@keyframes slideIn{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
+
+/* Buttons */
+.btn{padding:10px 20px;border-radius:24px;border:none;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.btn-primary{background:var(--accent);color:#000}
+.btn-outline{border:1.5px solid var(--border);background:transparent;color:var(--text)}
+.btn-danger{background:var(--danger);color:#fff;font-size:15px;padding:12px 28px}
+.btn:active{transform:scale(0.96)}
+
+/* Log */
+.log-card{background:var(--card);border-radius:var(--radius);padding:16px}
+.log-card h3{font-size:14px;margin-bottom:10px}
+.log-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.log-item:last-child{border:none}
+.log-item .ts{color:var(--muted);font-size:11px}
+.log-item .tag{padding:3px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.tag.ok{background:rgba(16,185,129,0.2);color:var(--accent2)}
+.tag.warn{background:rgba(245,158,11,0.2);color:var(--warn)}
+.tag.loc{background:rgba(239,68,68,0.2);color:var(--danger)}
+
+/* Bottom nav */
+.nav{display:flex;gap:0;background:var(--card);border-radius:var(--radius);overflow:hidden;margin-top:4px}
+.nav button{flex:1;padding:12px;background:none;border:none;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.nav button.active{background:var(--card2);color:var(--accent)}
+
+/* Tabs */
+.tab{display:none}
+.tab.active{display:flex;flex-direction:column;gap:14px}
+
+/* Settings */
+.settings-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:14px}
+.settings-row .val{color:var(--muted);font-size:13px}
+.toggle{width:48px;height:28px;background:var(--border);border-radius:14px;position:relative;cursor:pointer;transition:background 0.3s}
+.toggle.on{background:var(--accent2)}
+.toggle::after{content:'';position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;top:3px;left:3px;transition:transform 0.3s}
+.toggle.on::after{transform:translateX(20px)}
+
+/* Sim controls */
+.sim-btn{width:100%;padding:14px;border-radius:var(--radius);border:2px dashed var(--warn);background:rgba(245,158,11,0.08);color:var(--warn);font-size:14px;font-weight:700;cursor:pointer}
+.sim-btn:active{background:rgba(245,158,11,0.2)}
+
+@media (max-width:360px){
+  .stat .value{font-size:22px}
+  canvas{height:100px}
+  .epoch-dot{width:36px;height:36px}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>🛡️ Solo-SafetyNet</h1>
+    <div class="badge" id="connBadge">
+      <span class="dot online" id="connDot"></span>
+      <span id="connLabel">Connected</span>
+    </div>
+  </div>
+
+  <!-- Dashboard Tab -->
+  <div class="tab active" id="tabDashboard">
+
+    <!-- Stats -->
+    <div class="status-bar">
+      <div class="stat">
+        <span class="label">❤️ Heart Rate</span>
+        <span class="value" id="hrVal">72</span>
+        <span class="sub">bpm</span>
+      </div>
+      <div class="stat">
+        <span class="label">🩸 SpO₂</span>
+        <span class="value" id="spo2Val">98</span>
+        <span class="sub">%</span>
+      </div>
+      <div class="stat">
+        <span class="label">🌡️ Temperature</span>
+        <span class="value" id="tempVal">36.4</span>
+        <span class="sub">°C</span>
+      </div>
+      <div class="stat">
+        <span class="label">⏱️ Next Sample</span>
+        <span class="value" id="nextVal">4:32</span>
+        <span class="sub">min</span>
+      </div>
+    </div>
+
+    <!-- Waveform -->
+    <div class="wave-card">
+      <div class="label-row"><span>📈 PPG Waveform (IR)</span><span class="live">● LIVE</span></div>
+      <canvas id="ppgCanvas"></canvas>
+    </div>
+
+    <!-- MEMS -->
+    <div class="label-row" style="padding:0 4px"><span>📐 3-Axis MEMS</span></div>
+    <div class="mems-grid">
+      <div class="mems-cell"><span class="axis">X</span><span class="val" id="memsX">0.02</span><span class="bar x" id="barX"></span></div>
+      <div class="mems-cell"><span class="axis">Y</span><span class="val" id="memsY">-0.01</span><span class="bar y" id="barY"></span></div>
+      <div class="mems-cell"><span class="axis">Z</span><span class="val" id="memsZ">0.98</span><span class="bar z" id="barZ"></span></div>
+    </div>
+
+    <!-- Epoch Confirmation -->
+    <div class="epoch-card">
+      <div class="top"><span class="title">🔍 LOC Confirmation (3-Epoch)</span><span class="timer" id="epochTimer">Idle</span></div>
+      <div class="epoch-dots">
+        <div class="epoch-dot" id="ep1">E₁</div>
+        <div class="epoch-dot" id="ep2">E₂</div>
+        <div class="epoch-dot" id="ep3">E₃</div>
+      </div>
+      <div class="score">Risk score: <strong id="riskScore">0.02</strong></div>
+    </div>
+
+    <!-- Alert Banner -->
+    <div class="alert-banner" id="alertBanner">
+      <div class="icon">🚨</div>
+      <div class="msg">Loss of Consciousness Detected</div>
+      <div class="detail">3/3 epochs confirmed · 13 min · No voluntary movement detected</div>
+      <div class="actions">
+        <button class="btn btn-danger" onclick="triggerAlert()">📞 Alert Caregiver</button>
+        <button class="btn btn-outline" onclick="dismissAlert()">✕ Dismiss</button>
+      </div>
+    </div>
+
+    <!-- Simulate -->
+    <button class="sim-btn" onclick="simulateLOC()">⚠️ SIMULATE: Trigger LOC Sequence</button>
+
+  </div>
+
+  <!-- Log Tab -->
+  <div class="tab" id="tabLog">
+    <div class="log-card">
+      <h3>📋 Event Log</h3>
+      <div id="logList">
+        <div class="log-item"><span><span class="tag ok">OK</span> Normal epoch</span><span class="ts">16:28</span></div>
+        <div class="log-item"><span><span class="tag ok">OK</span> Normal epoch</span><span class="ts">16:23</span></div>
+        <div class="log-item"><span><span class="tag ok">OK</span> Normal epoch</span><span class="ts">16:18</span></div>
+        <div class="log-item"><span><span class="tag ok">OK</span> Normal epoch</span><span class="ts">16:13</span></div>
+        <div class="log-item"><span><span class="tag ok">OK</span> Normal epoch</span><span class="ts">16:08</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div class="tab" id="tabSettings">
+    <div class="log-card">
+      <h3>⚙️ Settings</h3>
+      <div class="settings-row"><span>Ring battery</span><span class="val">87%</span></div>
+      <div class="settings-row"><span>Sampling rate</span><span class="val">500 Hz</span></div>
+      <div class="settings-row"><span>Epoch window</span><span class="val">30 seconds</span></div>
+      <div class="settings-row"><span>Repeat interval</span><span class="val">5 minutes</span></div>
+      <div class="settings-row"><span>LOC threshold</span><span class="val">0.85</span></div>
+      <div class="settings-row"><span>Confirmation epochs</span><span class="val">3 of 3</span></div>
+      <div class="settings-row"><span>Model</span><span class="val">1D CNN · 305K params</span></div>
+      <div class="settings-row"><span>Edge Impulse project</span><span class="val">loc-detect-ring</span></div>
+      <div class="settings-row">
+        <span>Simulation mode</span>
+        <div class="toggle on" id="simToggle" onclick="toggleSim()"></div>
+      </div>
+      <div class="settings-row"><span>Caregiver phone</span><span class="val">+1 (555) 0123</span></div>
+      <div class="settings-row"><span>Version</span><span class="val">PWA v0.1.0 · Nov 2026</span></div>
+    </div>
+  </div>
+
+  <!-- Nav -->
+  <div class="nav">
+    <button class="active" data-tab="tabDashboard">🏠 Dashboard</button>
+    <button data-tab="tabLog">📋 Log</button>
+    <button data-tab="tabSettings">⚙️ Settings</button>
+  </div>
+
+</div>
+
+<script>
+// ── State ──
+let hr=72, spo2=98, temp=36.4, mems={x:0.02,y:-0.01,z:0.98};
+let epochState=[false,false,false];
+let locConfirmed=false;
+let simRunning=false;
+let countdown=270;
+let epochPhase=0;
+
+// ── Canvas ──
+const canvas=document.getElementById('ppgCanvas');
+const ctx=canvas.getContext('2d');
+const buf=new Array(300).fill(0.5);
+let bufIdx=0;
+
+function resizeCanvas(){
+  const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width-32;
+  canvas.height=130;
+}
+resizeCanvas();
+window.addEventListener('resize',resizeCanvas);
+
+function drawPPG(){
+  const w=canvas.width, h=canvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='#1e293b'; ctx.lineWidth=0.5;
+  for(let y=0;y<h;y+=h/4){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+  ctx.beginPath();
+  ctx.strokeStyle='#22d3ee'; ctx.lineWidth=2; ctx.shadowColor='rgba(34,211,238,0.4)'; ctx.shadowBlur=6;
+  for(let i=0;i<buf.length;i++){
+    const x=i/buf.length*w;
+    const idx=(bufIdx+i)%buf.length;
+    const y=(0.9-buf[idx]*0.75)*h;
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur=0;
+}
+
+function updatePPG(){
+  const base=0.5+0.15*Math.sin(Date.now()/600);
+  const pulse=0.25*Math.sin(Date.now()/(60000/hr)*2*Math.PI);
+  const noise=0.02*(Math.random()-0.5);
+  if(simRunning && epochPhase===1){
+    const collapse=Math.max(0,1-(Date.now()-simStart)/8000);
+    buf[bufIdx]=base+pulse*collapse+noise;
+    hr=Math.max(38,72-34*collapse);
+    spo2=Math.max(85,98-13*collapse);
+  }else{
+    buf[bufIdx]=base+pulse+noise;
+    hr=72+2*(Math.random()-0.5);
+    spo2=98+Math.random()-0.5;
+  }
+  bufIdx=(bufIdx+1)%buf.length;
+  drawPPG();
+}
+
+// ── MEMS update ──
+function updateMEMS(){
+  if(simRunning && epochPhase===1){
+    const collapse=Math.max(0,1-(Date.now()-simStart)/8000);
+    mems.x=0.02*(1-collapse)+0.01*(Math.random()-0.5);
+    mems.y=-0.01*(1-collapse)+0.01*(Math.random()-0.5);
+    if(collapse>0.7)mems.z=0.98-0.96*(1-collapse);
+    else mems.z=0.01+0.005*(Math.random()-0.5);
+  }else{
+    mems.x=0.02+0.03*(Math.random()-0.5);
+    mems.y=-0.01+0.03*(Math.random()-0.5);
+    mems.z=0.98+0.04*(Math.random()-0.5);
+  }
+  document.getElementById('memsX').textContent=mems.x.toFixed(2);
+  document.getElementById('memsY').textContent=mems.y.toFixed(2);
+  document.getElementById('memsZ').textContent=mems.z.toFixed(2);
+  document.getElementById('barX').style.width=Math.min(100,Math.abs(mems.x)*800)+'%';
+  document.getElementById('barY').style.width=Math.min(100,Math.abs(mems.y)*800)+'%';
+  document.getElementById('barZ').style.width=Math.min(100,Math.abs(mems.z)*100)+'%';
+}
+
+// ── Countdown ──
+let simStart=0;
+function updateCountdown(){
+  document.getElementById('hrVal').textContent=Math.round(hr);
+  document.getElementById('spo2Val').textContent=Math.round(spo2);
+  document.getElementById('tempVal').textContent=temp.toFixed(1);
+
+  if(simRunning){
+    const elapsed=(Date.now()-simStart)/1000;
+    if(elapsed<30){epochPhase=1;countdown=30-elapsed;}
+    else if(elapsed<330){epochPhase=2;countdown=330-elapsed;}
+    else if(elapsed<360){epochPhase=1;countdown=360-elapsed;}
+    else if(elapsed<660){epochPhase=2;countdown=660-elapsed;}
+    else if(elapsed<690){epochPhase=1;countdown=690-elapsed;}
+    else{epochPhase=2;countdown=Math.max(0,990-elapsed);}
+  }
+  const m=Math.floor(countdown/60),s=Math.floor(countdown%60);
+  document.getElementById('nextVal').textContent=m+':'+String(s).padStart(2,'0');
+
+  const phaseLabels=['Idle','Sampling…','Waiting'];
+  document.getElementById('epochTimer').textContent=simRunning?phaseLabels[epochPhase]:'Idle';
+}
+
+// ── Epoch management ──
+function updateEpochs(){
+  if(!simRunning){document.getElementById('ep1').className='epoch-dot';document.getElementById('ep2').className='epoch-dot';document.getElementById('ep3').className='epoch-dot';document.getElementById('riskScore').textContent='0.02';return;}
+  const elapsed=(Date.now()-simStart)/1000;
+  const dotE1=document.getElementById('ep1'),dotE2=document.getElementById('ep2'),dotE3=document.getElementById('ep3');
+  [dotE1,dotE2,dotE3].forEach(d=>{d.className='epoch-dot';});
+  if(elapsed<4)dotE1.classList.add('active');
+  else dotE1.classList.add(epochState[0]?'danger':'done');
+  if(elapsed>=5&&elapsed<10)dotE2.classList.add('active');
+  else if(elapsed>=10)dotE2.classList.add(epochState[1]?'danger':'done');
+  if(elapsed>=11&&elapsed<16)dotE3.classList.add('active');
+  else if(elapsed>=16)dotE3.classList.add(epochState[2]?'danger':'done');
+  document.getElementById('riskScore').textContent=simRunning?Math.min(0.99,elapsed/17*0.98).toFixed(2):'0.02';
+}
+
+let locTriggered=false;
+function checkLOC(){
+  if(!simRunning||locTriggered)return;
+  const elapsed=(Date.now()-simStart)/1000;
+  if(elapsed>=4&&!epochState[0]){epochState[0]=true;addLog('warn','⚠️ E₁ — LOC suspected (PPG collapse + stillness)');}
+  if(elapsed>=10&&!epochState[1]){epochState[1]=true;addLog('warn','⚠️ E₂ — LOC confirmed (consistent signature)');}
+  if(elapsed>=16&&!epochState[2]){
+    epochState[2]=true;
+    addLog('loc','🚨 E₃ — LOC CONFIRMED · Alert triggered');
+    document.getElementById('alertBanner').classList.add('show');
+    locTriggered=true;
+    document.querySelector('.alert-banner .detail').textContent='3/3 epochs confirmed · ~16 sec (simulated) · No voluntary movement';
+    if(navigator.vibrate)navigator.vibrate([200,100,200,100,200]);
+  }
+}
+
+// ── Log ──
+function addLog(tag,msg){
+  const now=new Date();
+  const ts=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+  const list=document.getElementById('logList');
+  const div=document.createElement('div');
+  div.className='log-item';
+  div.innerHTML=`<span><span class="tag ${tag}">${tag==='ok'?'OK':tag==='warn'?'WARN':'LOC'}</span> ${msg}</span><span class="ts">${ts}</span>`;
+  list.insertBefore(div,list.firstChild);
+}
+
+// ── Simulation ──
+function simulateLOC(){
+  if(simRunning)return;
+  simRunning=true; locTriggered=false;
+  epochState=[false,false,false];
+  simStart=Date.now();
+  document.getElementById('alertBanner').classList.remove('show');
+  document.getElementById('ep1').className='epoch-dot';
+  document.getElementById('ep2').className='epoch-dot';
+  document.getElementById('ep3').className='epoch-dot';
+  document.getElementById('riskScore').textContent='0.00';
+  document.getElementById('epochTimer').textContent='Sampling…';
+  addLog('ok','▶️ Simulation started — 3 epochs compressed demo');
+}
+
+function triggerAlert(){
+  addLog('loc','📞 Caregiver alert sent to +1 (555) 0123');
+  alert('📞 Alert sent to caregiver:\n"Possible loss of consciousness detected for Robert. Last known: home. Please check immediately."');
+}
+
+function dismissAlert(){
+  document.getElementById('alertBanner').classList.remove('show');
+  simRunning=false; locTriggered=false;
+  epochState=[false,false,false];
+  addLog('ok','✕ Alert dismissed by user');
+}
+
+// ── Navigation ──
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Settings toggle ──
+function toggleSim(){
+  const t=document.getElementById('simToggle');
+  t.classList.toggle('on');
+}
+
+// ── Main loop ──
+function loop(){
+  updatePPG();
+  updateMEMS();
+  if(simRunning){
+    countdown=Math.max(0,countdown-0.4);
+  }
+  updateCountdown();
+  updateEpochs();
+  checkLOC();
+  requestAnimationFrame(loop);
+}
+
+// Start
+addLog('ok','🟢 Solo-SafetyNet connected · Monitoring started');
+if(!simRunning)document.getElementById('epochTimer').textContent='Idle';
+loop();
+</script>
+</body>
+</html>
